@@ -1,0 +1,146 @@
+package cli
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/spf13/cobra"
+	"github.com/yoanbernabeu/grepai/config"
+	"github.com/yoanbernabeu/grepai/indexer"
+)
+
+var (
+	initProvider string
+	initBackend  string
+	initNonInteractive bool
+)
+
+var initCmd = &cobra.Command{
+	Use:   "init",
+	Short: "Initialize grepai in the current directory",
+	Long: `Initialize grepai by creating a .grepai directory with configuration.
+
+This command will:
+- Create .grepai/config.yaml with default settings
+- Prompt for embedding provider (Ollama or OpenAI)
+- Prompt for storage backend (GOB file or PostgreSQL)
+- Add .grepai/ to .gitignore if present`,
+	RunE: runInit,
+}
+
+func init() {
+	initCmd.Flags().StringVarP(&initProvider, "provider", "p", "", "Embedding provider (ollama or openai)")
+	initCmd.Flags().StringVarP(&initBackend, "backend", "b", "", "Storage backend (gob or postgres)")
+	initCmd.Flags().BoolVar(&initNonInteractive, "yes", false, "Use defaults without prompting")
+}
+
+func runInit(cmd *cobra.Command, args []string) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+
+	// Check if already initialized
+	if config.Exists(cwd) {
+		fmt.Println("grepai is already initialized in this directory.")
+		fmt.Printf("Configuration: %s\n", config.GetConfigPath(cwd))
+		return nil
+	}
+
+	cfg := config.DefaultConfig()
+
+	// Interactive mode
+	if !initNonInteractive {
+		reader := bufio.NewReader(os.Stdin)
+
+		// Provider selection
+		if initProvider == "" {
+			fmt.Println("\nSelect embedding provider:")
+			fmt.Println("  1) ollama (local, privacy-first, requires Ollama running)")
+			fmt.Println("  2) openai (cloud, requires API key)")
+			fmt.Print("Choice [1]: ")
+
+			input, _ := reader.ReadString('\n')
+			input = strings.TrimSpace(input)
+
+			switch input {
+			case "2", "openai":
+				cfg.Embedder.Provider = "openai"
+				cfg.Embedder.Model = "text-embedding-3-small"
+				cfg.Embedder.Endpoint = "https://api.openai.com/v1"
+			default:
+				cfg.Embedder.Provider = "ollama"
+			}
+		} else {
+			cfg.Embedder.Provider = initProvider
+			if initProvider == "openai" {
+				cfg.Embedder.Model = "text-embedding-3-small"
+				cfg.Embedder.Endpoint = "https://api.openai.com/v1"
+			}
+		}
+
+		// Backend selection
+		if initBackend == "" {
+			fmt.Println("\nSelect storage backend:")
+			fmt.Println("  1) gob (local file, recommended for most projects)")
+			fmt.Println("  2) postgres (pgvector, for large monorepos or shared index)")
+			fmt.Print("Choice [1]: ")
+
+			input, _ := reader.ReadString('\n')
+			input = strings.TrimSpace(input)
+
+			switch input {
+			case "2", "postgres":
+				cfg.Store.Backend = "postgres"
+				fmt.Print("PostgreSQL DSN: ")
+				dsn, _ := reader.ReadString('\n')
+				cfg.Store.Postgres.DSN = strings.TrimSpace(dsn)
+			default:
+				cfg.Store.Backend = "gob"
+			}
+		} else {
+			cfg.Store.Backend = initBackend
+		}
+	} else {
+		// Non-interactive with flags
+		if initProvider != "" {
+			cfg.Embedder.Provider = initProvider
+		}
+		if initBackend != "" {
+			cfg.Store.Backend = initBackend
+		}
+	}
+
+	// Save configuration
+	if err := cfg.Save(cwd); err != nil {
+		return fmt.Errorf("failed to save configuration: %w", err)
+	}
+
+	fmt.Printf("\nCreated configuration at %s\n", config.GetConfigPath(cwd))
+
+	// Add .grepai/ to .gitignore
+	gitignorePath := cwd + "/.gitignore"
+	if _, err := os.Stat(gitignorePath); err == nil {
+		if err := indexer.AddToGitignore(cwd, ".grepai/"); err != nil {
+			fmt.Printf("Warning: could not update .gitignore: %v\n", err)
+		} else {
+			fmt.Println("Added .grepai/ to .gitignore")
+		}
+	}
+
+	fmt.Println("\ngrepai initialized successfully!")
+	fmt.Println("\nNext steps:")
+	fmt.Println("  1. Start the indexing daemon: grepai watch")
+	fmt.Println("  2. Search your code: grepai search \"your query\"")
+
+	if cfg.Embedder.Provider == "ollama" {
+		fmt.Println("\nMake sure Ollama is running with the nomic-embed-text model:")
+		fmt.Println("  ollama pull nomic-embed-text")
+	} else if cfg.Embedder.Provider == "openai" {
+		fmt.Println("\nMake sure OPENAI_API_KEY is set in your environment.")
+	}
+
+	return nil
+}

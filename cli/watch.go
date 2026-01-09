@@ -1,0 +1,202 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/spf13/cobra"
+	"github.com/yoanbernabeu/grepai/config"
+	"github.com/yoanbernabeu/grepai/embedder"
+	"github.com/yoanbernabeu/grepai/indexer"
+	"github.com/yoanbernabeu/grepai/store"
+	"github.com/yoanbernabeu/grepai/watcher"
+)
+
+var watchCmd = &cobra.Command{
+	Use:   "watch",
+	Short: "Start the real-time file watcher daemon",
+	Long: `Start a background process that monitors file changes and maintains the index.
+
+The watcher will:
+- Perform an initial scan comparing disk state with existing index
+- Remove obsolete entries and index new files
+- Monitor filesystem events (create, modify, delete, rename)
+- Apply debouncing (500ms) to batch rapid changes
+- Handle atomic updates to avoid duplicate vectors`,
+	RunE: runWatch,
+}
+
+func runWatch(cmd *cobra.Command, args []string) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle signals
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Find project root
+	projectRoot, err := config.FindProjectRoot()
+	if err != nil {
+		return err
+	}
+
+	// Load configuration
+	cfg, err := config.Load(projectRoot)
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	fmt.Printf("Starting grepai watch in %s\n", projectRoot)
+	fmt.Printf("Provider: %s (%s)\n", cfg.Embedder.Provider, cfg.Embedder.Model)
+	fmt.Printf("Backend: %s\n", cfg.Store.Backend)
+
+	// Initialize embedder
+	var emb embedder.Embedder
+	switch cfg.Embedder.Provider {
+	case "ollama":
+		ollamaEmb := embedder.NewOllamaEmbedder(
+			embedder.WithOllamaEndpoint(cfg.Embedder.Endpoint),
+			embedder.WithOllamaModel(cfg.Embedder.Model),
+		)
+		// Test connection
+		if err := ollamaEmb.Ping(ctx); err != nil {
+			return fmt.Errorf("cannot connect to Ollama: %w\nMake sure Ollama is running and has the %s model", err, cfg.Embedder.Model)
+		}
+		emb = ollamaEmb
+	case "openai":
+		var err error
+		emb, err = embedder.NewOpenAIEmbedder(
+			embedder.WithOpenAIModel(cfg.Embedder.Model),
+			embedder.WithOpenAIKey(cfg.Embedder.APIKey),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to initialize OpenAI embedder: %w", err)
+		}
+	default:
+		return fmt.Errorf("unknown embedding provider: %s", cfg.Embedder.Provider)
+	}
+	defer emb.Close()
+
+	// Initialize store
+	var st store.VectorStore
+	switch cfg.Store.Backend {
+	case "gob":
+		indexPath := config.GetIndexPath(projectRoot)
+		gobStore := store.NewGOBStore(indexPath)
+		if err := gobStore.Load(ctx); err != nil {
+			return fmt.Errorf("failed to load index: %w", err)
+		}
+		st = gobStore
+	case "postgres":
+		var err error
+		st, err = store.NewPostgresStore(ctx, cfg.Store.Postgres.DSN, projectRoot)
+		if err != nil {
+			return fmt.Errorf("failed to connect to postgres: %w", err)
+		}
+	default:
+		return fmt.Errorf("unknown storage backend: %s", cfg.Store.Backend)
+	}
+	defer st.Close()
+
+	// Initialize ignore matcher
+	ignoreMatcher, err := indexer.NewIgnoreMatcher(projectRoot, cfg.Ignore)
+	if err != nil {
+		return fmt.Errorf("failed to initialize ignore matcher: %w", err)
+	}
+
+	// Initialize scanner
+	scanner := indexer.NewScanner(projectRoot, ignoreMatcher)
+
+	// Initialize chunker
+	chunker := indexer.NewChunker(cfg.Chunking.Size, cfg.Chunking.Overlap)
+
+	// Initialize indexer
+	idx := indexer.NewIndexer(projectRoot, st, emb, chunker, scanner)
+
+	// Initial scan
+	fmt.Println("\nPerforming initial scan...")
+	stats, err := idx.IndexAll(ctx)
+	if err != nil {
+		return fmt.Errorf("initial indexing failed: %w", err)
+	}
+
+	fmt.Printf("Initial scan complete: %d files indexed, %d chunks created, %d files removed, %d skipped (took %s)\n",
+		stats.FilesIndexed, stats.ChunksCreated, stats.FilesRemoved, stats.FilesSkipped, stats.Duration.Round(time.Millisecond))
+
+	// Save index after initial scan
+	if err := st.Persist(ctx); err != nil {
+		log.Printf("Warning: failed to persist index: %v", err)
+	}
+
+	// Initialize watcher
+	w, err := watcher.NewWatcher(projectRoot, ignoreMatcher, cfg.Watch.DebounceMs)
+	if err != nil {
+		return fmt.Errorf("failed to initialize watcher: %w", err)
+	}
+	defer w.Close()
+
+	if err := w.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start watcher: %w", err)
+	}
+
+	fmt.Println("\nWatching for changes... (Press Ctrl+C to stop)")
+
+	// Periodic persist ticker
+	persistTicker := time.NewTicker(30 * time.Second)
+	defer persistTicker.Stop()
+
+	// Event loop
+	for {
+		select {
+		case <-sigChan:
+			fmt.Println("\nShutting down...")
+			if err := st.Persist(ctx); err != nil {
+				log.Printf("Warning: failed to persist index on shutdown: %v", err)
+			}
+			return nil
+
+		case <-persistTicker.C:
+			if err := st.Persist(ctx); err != nil {
+				log.Printf("Warning: failed to persist index: %v", err)
+			}
+
+		case event := <-w.Events():
+			handleFileEvent(ctx, idx, scanner, event)
+		}
+	}
+}
+
+func handleFileEvent(ctx context.Context, idx *indexer.Indexer, scanner *indexer.Scanner, event watcher.FileEvent) {
+	log.Printf("[%s] %s", event.Type, event.Path)
+
+	switch event.Type {
+	case watcher.EventCreate, watcher.EventModify:
+		fileInfo, err := scanner.ScanFile(event.Path)
+		if err != nil {
+			log.Printf("Failed to scan %s: %v", event.Path, err)
+			return
+		}
+		if fileInfo == nil {
+			return // File was skipped (binary, too large, etc.)
+		}
+
+		chunks, err := idx.IndexFile(ctx, *fileInfo)
+		if err != nil {
+			log.Printf("Failed to index %s: %v", event.Path, err)
+			return
+		}
+		log.Printf("Indexed %s (%d chunks)", event.Path, chunks)
+
+	case watcher.EventDelete, watcher.EventRename:
+		if err := idx.RemoveFile(ctx, event.Path); err != nil {
+			log.Printf("Failed to remove %s from index: %v", event.Path, err)
+			return
+		}
+		log.Printf("Removed %s from index", event.Path)
+	}
+}

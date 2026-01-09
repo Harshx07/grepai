@@ -1,0 +1,210 @@
+package store
+
+import (
+	"context"
+	"encoding/gob"
+	"fmt"
+	"math"
+	"os"
+	"sort"
+	"sync"
+)
+
+type GOBStore struct {
+	indexPath string
+	chunks    map[string]Chunk    // id -> chunk
+	documents map[string]Document // path -> document
+	mu        sync.RWMutex
+}
+
+type gobData struct {
+	Chunks    map[string]Chunk
+	Documents map[string]Document
+}
+
+func NewGOBStore(indexPath string) *GOBStore {
+	return &GOBStore{
+		indexPath: indexPath,
+		chunks:    make(map[string]Chunk),
+		documents: make(map[string]Document),
+	}
+}
+
+func (s *GOBStore) SaveChunks(ctx context.Context, chunks []Chunk) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, chunk := range chunks {
+		s.chunks[chunk.ID] = chunk
+	}
+
+	return nil
+}
+
+func (s *GOBStore) DeleteByFile(ctx context.Context, filePath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	doc, ok := s.documents[filePath]
+	if !ok {
+		return nil
+	}
+
+	for _, chunkID := range doc.ChunkIDs {
+		delete(s.chunks, chunkID)
+	}
+
+	return nil
+}
+
+func (s *GOBStore) Search(ctx context.Context, queryVector []float32, limit int) ([]SearchResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	results := make([]SearchResult, 0, len(s.chunks))
+
+	for _, chunk := range s.chunks {
+		score := cosineSimilarity(queryVector, chunk.Vector)
+		results = append(results, SearchResult{
+			Chunk: chunk,
+			Score: score,
+		})
+	}
+
+	// Sort by score descending
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, nil
+}
+
+func (s *GOBStore) GetDocument(ctx context.Context, filePath string) (*Document, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	doc, ok := s.documents[filePath]
+	if !ok {
+		return nil, nil
+	}
+
+	return &doc, nil
+}
+
+func (s *GOBStore) SaveDocument(ctx context.Context, doc Document) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.documents[doc.Path] = doc
+	return nil
+}
+
+func (s *GOBStore) DeleteDocument(ctx context.Context, filePath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.documents, filePath)
+	return nil
+}
+
+func (s *GOBStore) ListDocuments(ctx context.Context) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	paths := make([]string, 0, len(s.documents))
+	for path := range s.documents {
+		paths = append(paths, path)
+	}
+
+	return paths, nil
+}
+
+func (s *GOBStore) Load(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	file, err := os.Open(s.indexPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // No existing index, start fresh
+		}
+		return fmt.Errorf("failed to open index file: %w", err)
+	}
+	defer file.Close()
+
+	var data gobData
+	decoder := gob.NewDecoder(file)
+	if err := decoder.Decode(&data); err != nil {
+		return fmt.Errorf("failed to decode index: %w", err)
+	}
+
+	s.chunks = data.Chunks
+	s.documents = data.Documents
+
+	if s.chunks == nil {
+		s.chunks = make(map[string]Chunk)
+	}
+	if s.documents == nil {
+		s.documents = make(map[string]Document)
+	}
+
+	return nil
+}
+
+func (s *GOBStore) Persist(ctx context.Context) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	file, err := os.Create(s.indexPath)
+	if err != nil {
+		return fmt.Errorf("failed to create index file: %w", err)
+	}
+	defer file.Close()
+
+	data := gobData{
+		Chunks:    s.chunks,
+		Documents: s.documents,
+	}
+
+	encoder := gob.NewEncoder(file)
+	if err := encoder.Encode(data); err != nil {
+		return fmt.Errorf("failed to encode index: %w", err)
+	}
+
+	return nil
+}
+
+func (s *GOBStore) Close() error {
+	return s.Persist(context.Background())
+}
+
+func (s *GOBStore) Stats() (numDocs int, numChunks int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.documents), len(s.chunks)
+}
+
+// cosineSimilarity calculates the cosine similarity between two vectors
+func cosineSimilarity(a, b []float32) float32 {
+	if len(a) != len(b) {
+		return 0
+	}
+
+	var dotProduct, normA, normB float64
+
+	for i := range a {
+		dotProduct += float64(a[i]) * float64(b[i])
+		normA += float64(a[i]) * float64(a[i])
+		normB += float64(b[i]) * float64(b[i])
+	}
+
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+
+	return float32(dotProduct / (math.Sqrt(normA) * math.Sqrt(normB)))
+}
