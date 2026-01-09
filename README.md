@@ -48,6 +48,7 @@ grepai search "error handling" # Search semantically
 | `grepai init`            | Initialize grepai in current directory |
 | `grepai watch`           | Start real-time file watcher daemon    |
 | `grepai search <query>`  | Search codebase with natural language  |
+| `grepai status`          | Browse index state interactively       |
 | `grepai agent-setup`     | Configure AI agents integration        |
 
 ```bash
