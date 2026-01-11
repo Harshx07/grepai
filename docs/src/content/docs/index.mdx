@@ -53,6 +53,9 @@ import { Card, CardGrid, LinkCard, Steps, Tabs, TabItem, Badge } from '@astrojs/
   <Card title="AI Agent Ready" icon="puzzle">
     First-class integration with Cursor, Windsurf, Claude Code, Gemini CLI, and more.
   </Card>
+  <Card title="MCP Server" icon="setting">
+    Run as a native MCP server. AI agents discover grepai as a first-class tool automatically.
+  </Card>
 </CardGrid>
 
 ---
@@ -202,7 +205,12 @@ import { Card, CardGrid, LinkCard, Steps, Tabs, TabItem, Badge } from '@astrojs/
   <LinkCard
     title="AI Agent Setup"
     description="Integrate with Cursor, Claude Code, Windsurf."
-    href="/grepai/commands/agent-setup/"
+    href="/grepai/commands/grepai_agent-setup/"
+  />
+  <LinkCard
+    title="MCP Integration"
+    description="Use grepai as a native MCP tool for AI agents."
+    href="/grepai/mcp/"
   />
   <LinkCard
     title="Contributing"

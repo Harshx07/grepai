@@ -26,6 +26,7 @@ export default defineConfig({
             { label: 'Semantic Search', link: '/search-guide/' },
             { label: 'File Watching', link: '/watch-guide/' },
             { label: 'Call Graph Analysis', link: '/trace/' },
+            { label: 'MCP Integration', link: '/mcp/' },
             { label: 'Search Boost', link: '/search-boost/' },
             { label: 'Hybrid Search', link: '/hybrid-search/' },
           ],

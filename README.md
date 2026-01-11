@@ -85,6 +85,34 @@ grepai integrates natively with popular AI coding assistants. Run `grepai agent-
 | Gemini CLI   | `GEMINI.md`                            |
 | OpenAI Codex | `AGENTS.md`                            |
 
+### MCP Server Mode
+
+grepai can run as an MCP (Model Context Protocol) server, making it available as a native tool for AI agents:
+
+```bash
+grepai mcp-serve    # Start MCP server (stdio transport)
+```
+
+Configure in your AI tool's MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "grepai": {
+      "command": "grepai",
+      "args": ["mcp-serve"]
+    }
+  }
+}
+```
+
+Available MCP tools:
+- `grepai_search` — Semantic code search
+- `grepai_trace_callers` — Find function callers
+- `grepai_trace_callees` — Find function callees
+- `grepai_trace_graph` — Build call graph
+- `grepai_index_status` — Check index health
+
 ## Configuration
 
 Stored in `.grepai/config.yaml`:
