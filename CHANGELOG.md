@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-01-16
+
+### Added
+
+- **External Gitignore Support**: New `external_gitignore` configuration option to specify a path to an external gitignore file (e.g., `~/.config/git/ignore`) (#50)
+  - Supports `~` expansion for home directory paths
+  - External patterns are respected during indexing alongside project-level `.gitignore` files
+  - If the file doesn't exist, a warning is logged but indexing continues normally
+
 ## [0.15.0] - 2026-01-14
 
 ### Added
