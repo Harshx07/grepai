@@ -31,6 +31,40 @@ type SearchResult struct {
 	Content   string  `json:"content"`
 }
 
+// SearchResultCompact is a minimal struct for compact output (no content field).
+type SearchResultCompact struct {
+	FilePath  string  `json:"file_path"`
+	StartLine int     `json:"start_line"`
+	EndLine   int     `json:"end_line"`
+	Score     float32 `json:"score"`
+}
+
+// CallSiteCompact is a minimal struct for compact output (no context field).
+type CallSiteCompact struct {
+	File string `json:"file"`
+	Line int    `json:"line"`
+}
+
+// CallerInfoCompact is a compact version of trace.CallerInfo for compact output.
+type CallerInfoCompact struct {
+	Symbol   trace.Symbol    `json:"symbol"`
+	CallSite CallSiteCompact `json:"call_site"`
+}
+
+// CalleeInfoCompact is a compact version of trace.CalleeInfo for compact output.
+type CalleeInfoCompact struct {
+	Symbol   trace.Symbol    `json:"symbol"`
+	CallSite CallSiteCompact `json:"call_site"`
+}
+
+// CallEdgeCompact is a compact version of trace.CallEdge for compact output.
+type CallEdgeCompact struct {
+	CallerName string `json:"caller_name"`
+	CalleeName string `json:"callee_name"`
+	File       string `json:"file"`
+	Line       int    `json:"line"`
+}
+
 // IndexStatus represents the current state of the index.
 type IndexStatus struct {
 	TotalFiles   int    `json:"total_files"`
@@ -73,6 +107,9 @@ func (s *Server) registerTools() {
 		mcp.WithNumber("limit",
 			mcp.Description("Maximum number of results to return (default: 10)"),
 		),
+		mcp.WithBoolean("compact",
+			mcp.Description("Return minimal JSON without content (default: false)"),
+		),
 	)
 	s.mcpServer.AddTool(searchTool, s.handleSearch)
 
@@ -83,6 +120,9 @@ func (s *Server) registerTools() {
 			mcp.Required(),
 			mcp.Description("Name of the function/method to find callers for"),
 		),
+		mcp.WithBoolean("compact",
+			mcp.Description("Return minimal JSON without context (default: false)"),
+		),
 	)
 	s.mcpServer.AddTool(traceCallersTool, s.handleTraceCallers)
 
@@ -92,6 +132,9 @@ func (s *Server) registerTools() {
 		mcp.WithString("symbol",
 			mcp.Required(),
 			mcp.Description("Name of the function/method to find callees for"),
+		),
+		mcp.WithBoolean("compact",
+			mcp.Description("Return minimal JSON without context (default: false)"),
 		),
 	)
 	s.mcpServer.AddTool(traceCalleesTool, s.handleTraceCallees)
@@ -105,6 +148,9 @@ func (s *Server) registerTools() {
 		),
 		mcp.WithNumber("depth",
 			mcp.Description("Maximum depth for graph traversal (default: 2)"),
+		),
+		mcp.WithBoolean("compact",
+			mcp.Description("Return minimal JSON without context (default: false)"),
 		),
 	)
 	s.mcpServer.AddTool(traceGraphTool, s.handleTraceGraph)
@@ -127,6 +173,8 @@ func (s *Server) handleSearch(ctx context.Context, request mcp.CallToolRequest) 
 	if limit <= 0 {
 		limit = 10
 	}
+
+	compact := request.GetBool("compact", false)
 
 	// Load configuration
 	cfg, err := config.Load(s.projectRoot)
@@ -155,20 +203,32 @@ func (s *Server) handleSearch(ctx context.Context, request mcp.CallToolRequest) 
 		return mcp.NewToolResultError(fmt.Sprintf("search failed: %v", err)), nil
 	}
 
-	// Convert to lightweight results
-	searchResults := make([]SearchResult, len(results))
-	for i, r := range results {
-		searchResults[i] = SearchResult{
-			FilePath:  r.Chunk.FilePath,
-			StartLine: r.Chunk.StartLine,
-			EndLine:   r.Chunk.EndLine,
-			Score:     r.Score,
-			Content:   r.Chunk.Content,
+	var jsonBytes []byte
+	if compact {
+		searchResultsCompact := make([]SearchResultCompact, len(results))
+		for i, r := range results {
+			searchResultsCompact[i] = SearchResultCompact{
+				FilePath:  r.Chunk.FilePath,
+				StartLine: r.Chunk.StartLine,
+				EndLine:   r.Chunk.EndLine,
+				Score:     r.Score,
+			}
 		}
+		jsonBytes, err = json.MarshalIndent(searchResultsCompact, "", "  ")
+	} else {
+		searchResults := make([]SearchResult, len(results))
+		for i, r := range results {
+			searchResults[i] = SearchResult{
+				FilePath:  r.Chunk.FilePath,
+				StartLine: r.Chunk.StartLine,
+				EndLine:   r.Chunk.EndLine,
+				Score:     r.Score,
+				Content:   r.Chunk.Content,
+			}
+		}
+		jsonBytes, err = json.MarshalIndent(searchResults, "", "  ")
 	}
 
-	// Return JSON result
-	jsonBytes, err := json.MarshalIndent(searchResults, "", "  ")
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil
 	}
@@ -182,6 +242,8 @@ func (s *Server) handleTraceCallers(ctx context.Context, request mcp.CallToolReq
 	if err != nil {
 		return mcp.NewToolResultError("symbol parameter is required"), nil
 	}
+
+	compact := request.GetBool("compact", false)
 
 	// Initialize symbol store
 	symbolStore := trace.NewGOBSymbolStore(config.GetSymbolIndexPath(s.projectRoot))
@@ -214,32 +276,67 @@ func (s *Server) handleTraceCallers(ctx context.Context, request mcp.CallToolReq
 		return mcp.NewToolResultError(fmt.Sprintf("failed to lookup callers: %v", err)), nil
 	}
 
-	result := trace.TraceResult{
-		Query:  symbolName,
-		Mode:   "fast",
-		Symbol: &symbols[0],
-	}
-
-	// Convert refs to CallerInfo
-	for _, ref := range refs {
-		callerSyms, _ := symbolStore.LookupSymbol(ctx, ref.CallerName)
-		var callerSym trace.Symbol
-		if len(callerSyms) > 0 {
-			callerSym = callerSyms[0]
-		} else {
-			callerSym = trace.Symbol{Name: ref.CallerName, File: ref.CallerFile, Line: ref.CallerLine}
+	var jsonBytes []byte
+	if compact {
+		resultCompact := struct {
+			Query   string              `json:"query"`
+			Mode    string              `json:"mode"`
+			Symbol  *trace.Symbol       `json:"symbol,omitempty"`
+			Callers []CallerInfoCompact `json:"callers,omitempty"`
+		}{
+			Query:   symbolName,
+			Mode:    "fast",
+			Symbol:  &symbols[0],
+			Callers: make([]CallerInfoCompact, 0, len(refs)),
 		}
-		result.Callers = append(result.Callers, trace.CallerInfo{
-			Symbol: callerSym,
-			CallSite: trace.CallSite{
-				File:    ref.File,
-				Line:    ref.Line,
-				Context: ref.Context,
-			},
-		})
+
+		for _, ref := range refs {
+			callerSyms, _ := symbolStore.LookupSymbol(ctx, ref.CallerName)
+			var callerSym trace.Symbol
+			if len(callerSyms) > 0 {
+				callerSym = callerSyms[0]
+			} else {
+				callerSym = trace.Symbol{Name: ref.CallerName, File: ref.CallerFile, Line: ref.CallerLine}
+			}
+			resultCompact.Callers = append(resultCompact.Callers, CallerInfoCompact{
+				Symbol: callerSym,
+				CallSite: CallSiteCompact{
+					File: ref.File,
+					Line: ref.Line,
+				},
+			})
+		}
+
+		jsonBytes, err = json.MarshalIndent(resultCompact, "", "  ")
+	} else {
+		result := trace.TraceResult{
+			Query:  symbolName,
+			Mode:   "fast",
+			Symbol: &symbols[0],
+		}
+
+		// Convert refs to CallerInfo
+		for _, ref := range refs {
+			callerSyms, _ := symbolStore.LookupSymbol(ctx, ref.CallerName)
+			var callerSym trace.Symbol
+			if len(callerSyms) > 0 {
+				callerSym = callerSyms[0]
+			} else {
+				callerSym = trace.Symbol{Name: ref.CallerName, File: ref.CallerFile, Line: ref.CallerLine}
+			}
+			result.Callers = append(result.Callers, trace.CallerInfo{
+				Symbol: callerSym,
+				CallSite: trace.CallSite{
+					File:    ref.File,
+					Line:    ref.Line,
+					Context: ref.Context,
+				},
+			})
+		}
+
+		jsonBytes, err = json.MarshalIndent(result, "", "  ")
 	}
 
-	jsonBytes, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil
 	}
@@ -253,6 +350,8 @@ func (s *Server) handleTraceCallees(ctx context.Context, request mcp.CallToolReq
 	if err != nil {
 		return mcp.NewToolResultError("symbol parameter is required"), nil
 	}
+
+	compact := request.GetBool("compact", false)
 
 	// Initialize symbol store
 	symbolStore := trace.NewGOBSymbolStore(config.GetSymbolIndexPath(s.projectRoot))
@@ -285,31 +384,66 @@ func (s *Server) handleTraceCallees(ctx context.Context, request mcp.CallToolReq
 		return mcp.NewToolResultError(fmt.Sprintf("failed to lookup callees: %v", err)), nil
 	}
 
-	result := trace.TraceResult{
-		Query:  symbolName,
-		Mode:   "fast",
-		Symbol: &symbols[0],
-	}
-
-	for _, ref := range refs {
-		calleeSyms, _ := symbolStore.LookupSymbol(ctx, ref.SymbolName)
-		var calleeSym trace.Symbol
-		if len(calleeSyms) > 0 {
-			calleeSym = calleeSyms[0]
-		} else {
-			calleeSym = trace.Symbol{Name: ref.SymbolName}
+	var jsonBytes []byte
+	if compact {
+		resultCompact := struct {
+			Query   string              `json:"query"`
+			Mode    string              `json:"mode"`
+			Symbol  *trace.Symbol       `json:"symbol,omitempty"`
+			Callees []CalleeInfoCompact `json:"callees,omitempty"`
+		}{
+			Query:   symbolName,
+			Mode:    "fast",
+			Symbol:  &symbols[0],
+			Callees: make([]CalleeInfoCompact, 0, len(refs)),
 		}
-		result.Callees = append(result.Callees, trace.CalleeInfo{
-			Symbol: calleeSym,
-			CallSite: trace.CallSite{
-				File:    ref.File,
-				Line:    ref.Line,
-				Context: ref.Context,
-			},
-		})
+
+		for _, ref := range refs {
+			calleeSyms, _ := symbolStore.LookupSymbol(ctx, ref.SymbolName)
+			var calleeSym trace.Symbol
+			if len(calleeSyms) > 0 {
+				calleeSym = calleeSyms[0]
+			} else {
+				calleeSym = trace.Symbol{Name: ref.SymbolName}
+			}
+			resultCompact.Callees = append(resultCompact.Callees, CalleeInfoCompact{
+				Symbol: calleeSym,
+				CallSite: CallSiteCompact{
+					File: ref.File,
+					Line: ref.Line,
+				},
+			})
+		}
+
+		jsonBytes, err = json.MarshalIndent(resultCompact, "", "  ")
+	} else {
+		result := trace.TraceResult{
+			Query:  symbolName,
+			Mode:   "fast",
+			Symbol: &symbols[0],
+		}
+
+		for _, ref := range refs {
+			calleeSyms, _ := symbolStore.LookupSymbol(ctx, ref.SymbolName)
+			var calleeSym trace.Symbol
+			if len(calleeSyms) > 0 {
+				calleeSym = calleeSyms[0]
+			} else {
+				calleeSym = trace.Symbol{Name: ref.SymbolName}
+			}
+			result.Callees = append(result.Callees, trace.CalleeInfo{
+				Symbol: calleeSym,
+				CallSite: trace.CallSite{
+					File:    ref.File,
+					Line:    ref.Line,
+					Context: ref.Context,
+				},
+			})
+		}
+
+		jsonBytes, err = json.MarshalIndent(result, "", "  ")
 	}
 
-	jsonBytes, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil
 	}
@@ -328,6 +462,8 @@ func (s *Server) handleTraceGraph(ctx context.Context, request mcp.CallToolReque
 	if depth <= 0 {
 		depth = 2
 	}
+
+	_ = request.GetBool("compact", false)
 
 	// Initialize symbol store
 	symbolStore := trace.NewGOBSymbolStore(config.GetSymbolIndexPath(s.projectRoot))
