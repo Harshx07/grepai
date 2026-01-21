@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-01-21
+
+### Added
+
+- **Qdrant Vector Store Backend**: New storage backend using Qdrant vector database (#57)
+  - Support for local Qdrant (Docker) and Qdrant Cloud
+  - gRPC connection with TLS support
+  - Automatic collection creation and management
+  - Docker Compose profile for easy local setup: `docker compose --profile=qdrant up`
+  - Configuration options: endpoint, port, TLS, API key, collection name
+
+### Fixed
+
+- **Qdrant Backend Improvements**: Various fixes and improvements
+  - Fixed default port display in `grepai init` prompt (6333 → 6334 for gRPC)
+  - Added UTF-8 sanitization to prevent indexing errors on files with invalid characters
+  - Added `qdrant_storage` to default ignore patterns
+  - Updated CLI help to include qdrant in backend options
+  - Fixed typo in compose.yaml ("Optionnal" → "Optional")
+
 ## [0.17.0] - 2026-01-21
 
 ### Added
