@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-01-23
+
+### Added
+
+- **MCP Compact Mode**: New `compact` parameter for MCP tools to reduce token usage (#61)
+  - `grepai_search`: When `compact=true`, omits the `content` field (~80% token savings)
+  - `grepai_trace_callers`: When `compact=true`, omits the `context` field from call sites
+  - `grepai_trace_callees`: When `compact=true`, omits the `context` field from call sites
+  - Default is `false` for full backward compatibility
+  - Ideal for AI agents that only need file locations to then read files directly
+
+### Documentation
+
+- Added Opencode MCP configuration example
+
 ## [0.19.0] - 2026-01-22
 
 ### Added
@@ -312,7 +327,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial public release
 
-[Unreleased]: https://github.com/yoanbernabeu/grepai/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/yoanbernabeu/grepai/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/yoanbernabeu/grepai/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/yoanbernabeu/grepai/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/yoanbernabeu/grepai/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/yoanbernabeu/grepai/compare/v0.16.1...v0.17.0
