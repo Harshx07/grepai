@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-01-23
+
+### Fixed
+
+- **MCP Index Status Schema**: Added `verbose` parameter to `grepai_index_status` tool to fix empty schema issue with strict MCP clients like Copilot/GPT5-Codex-Max (#66)
+  - Some MCP clients require a non-empty input schema for all tools
+  - Added regression test to prevent future schema-related issues
+
 ## [0.20.0] - 2026-01-23
 
 ### Added
@@ -327,7 +335,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial public release
 
-[Unreleased]: https://github.com/yoanbernabeu/grepai/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/yoanbernabeu/grepai/compare/v0.20.1...HEAD
+[0.20.1]: https://github.com/yoanbernabeu/grepai/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/yoanbernabeu/grepai/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/yoanbernabeu/grepai/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/yoanbernabeu/grepai/compare/v0.17.0...v0.18.0
