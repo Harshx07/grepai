@@ -155,6 +155,7 @@ func (s *Server) registerTools() {
 	// grepai_index_status tool
 	indexStatusTool := mcp.NewTool("grepai_index_status",
 		mcp.WithDescription("Check the health and status of the grepai index. Returns statistics about indexed files, chunks, and configuration."),
+		mcp.WithBoolean("verbose", mcp.Description("Include additional debug details when available (optional).")),
 	)
 	s.mcpServer.AddTool(indexStatusTool, s.handleIndexStatus)
 }
