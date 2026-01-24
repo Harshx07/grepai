@@ -1,8 +1,0 @@
-blank_issues_enabled: false
-contact_links:
-  - name: Questions & Discussions
-    url: https://github.com/yoanbernabeu/grepai/discussions
-    about: Ask questions and discuss grepai with the community
-  - name: Documentation
-    url: https://github.com/yoanbernabeu/grepai#readme
-    about: Check the README for documentation
